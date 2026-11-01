@@ -1,0 +1,48 @@
+# Production Dockerfile for FIRA Backend API
+FROM python:3.12-slim
+
+# Install system runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-gobject0 \
+    libjpeg-dev \
+    libopenjp2-7-dev \
+    libffi-dev \
+    shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install poetry
+RUN pip install --no-cache-dir poetry==1.8.2
+
+WORKDIR /app
+
+# Disable virtualenvs so packages are installed globally in the container
+RUN poetry config virtualenvs.create false
+
+# Copy dependency definition
+COPY pyproject.toml ./
+
+# Install production dependencies only
+RUN poetry lock --no-update && poetry install --only main --no-interaction --no-ansi
+
+# Copy source code and database migrations
+COPY src/ /app/src/
+COPY alembic.ini /app/
+COPY alembic/ /app/alembic/
+
+EXPOSE 8000
+
+ENV PYTHONPATH=/app/src \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    WEB_CONCURRENCY=4
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/healthz || exit 1
+
+# Production command: uvicorn with worker pool
+CMD ["uvicorn", "fira.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]

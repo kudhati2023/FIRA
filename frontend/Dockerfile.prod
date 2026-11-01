@@ -1,0 +1,43 @@
+# Multi-stage production build for FIRA Frontend
+# Stage 1: Build static assets
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency files first for layer caching
+COPY package*.json ./
+
+# Install clean production dependencies
+RUN npm ci
+
+# Copy application source
+COPY . .
+
+# Build production bundle
+RUN npm run build
+
+# Stage 2: Serve with lightweight Nginx
+FROM nginx:1.27-alpine
+
+# Copy built assets
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy internal Nginx configuration for SPA routing
+RUN echo 'server {' \
+    '    listen 3000;' \
+    '    server_name _;' \
+    '    root /usr/share/nginx/html;' \
+    '    index index.html;' \
+    '    location / {' \
+    '        try_files $uri $uri/ /index.html;' \
+    '    }' \
+    '    location ~* \.(?:ico|css|js|gif|jpe?g|png|woff2?|eot|ttf|svg)$ {' \
+    '        expires 6M;' \
+    '        access_log off;' \
+    '        add_header Cache-Control "public, max-age=15552000, immutable";' \
+    '    }' \
+    '}' > /etc/nginx/conf.d/default.conf
+
+EXPOSE 3000
+
+CMD ["nginx", "-g", "daemon off;"]
